@@ -1,6 +1,11 @@
+/**
+ * vector_ops.c - Vector operations implementation for K-ISA
+ */
+
 #include "../../include/kisa.h"
 #include <math.h>
 #include <string.h>
+#include <stdio.h>
 
 // 位反转置换辅助函数
 static uint32_t reverse_bits_helper(uint32_t x, int bits) {
@@ -394,4 +399,88 @@ void vector_select(vector_reg_t* result, vector_reg_t* mask, vector_reg_t* a, ve
         (*result)[i] = (*mask)[i] ? (*a)[i] : (*b)[i];
     }
     #endif
+}
+
+// Print vector register contents
+void print_register(const char* name, const vector_reg_t* reg) {
+    if (!reg) {
+        printf("%s: [NULL]\n", name);
+        return;
+    }
+    
+    printf("%s: [", name);
+    
+#ifdef __aarch64__
+    // ARM64 NEON implementation
+    for (int i = 0; i < VECTOR_LENGTH; i++) {
+        int32_t val = 0;
+        if (i < 4) {
+            // Use switch-case for constant indices
+            switch(i) {
+                case 0: val = vgetq_lane_s32(reg->low, 0); break;
+                case 1: val = vgetq_lane_s32(reg->low, 1); break;
+                case 2: val = vgetq_lane_s32(reg->low, 2); break;
+                case 3: val = vgetq_lane_s32(reg->low, 3); break;
+            }
+        } else {
+            // Use switch-case for constant indices
+            switch(i - 4) {
+                case 0: val = vgetq_lane_s32(reg->high, 0); break;
+                case 1: val = vgetq_lane_s32(reg->high, 1); break;
+                case 2: val = vgetq_lane_s32(reg->high, 2); break;
+                case 3: val = vgetq_lane_s32(reg->high, 3); break;
+            }
+        }
+        printf("%d%s", val, i < VECTOR_LENGTH - 1 ? ", " : "");
+    }
+#else
+    // Generic implementation
+    for (int i = 0; i < VECTOR_LENGTH; i++) {
+        printf("%d%s", (*reg)[i], i < VECTOR_LENGTH - 1 ? ", " : "");
+    }
+#endif
+    
+    printf("]\n");
+}
+
+// 状态标志
+static struct {
+    bool zero;
+    bool negative;
+    bool carry;
+    bool overflow;
+} flags = {false, false, false, false};
+
+// 更新标志位
+void update_flags(int32_t result, bool check_carry) {
+    flags.zero = (result == 0);
+    flags.negative = (result < 0);
+    
+    if (check_carry) {
+        // 进位判断 (简化版)
+        flags.carry = (result < 0);
+        
+        // 溢出判断 (简化版)
+        flags.overflow = (result == INT32_MIN);
+    }
+}
+
+// 等于时分支
+bool branch_if_equal(int32_t value) {
+    return flags.zero;
+}
+
+// 不等于时分支
+bool branch_if_not_equal(int32_t value) {
+    return !flags.zero;
+}
+
+// 大于时分支
+bool branch_if_greater(int32_t value) {
+    return !flags.negative && !flags.zero;
+}
+
+// 小于时分支
+bool branch_if_less(int32_t value) {
+    return flags.negative;
 }
