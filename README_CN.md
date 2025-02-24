@@ -22,7 +22,7 @@ K-ISA 是一个高性能向量计算库，专注于实现高效的数据分析�
 ### 编译安装
 
 ```bash
-git clone https://github.com/yourusername/kisa.git
+git clone https://github.com/thinpo/kisa.git
 cd kisa
 mkdir build && cd build
 cmake ..

@@ -1,14 +1,14 @@
 /**
- * llm_calc.c - 使用K-ISA实现简化版LLM计算
+ * llm_calc.c - Simplified LLM calculations using K-ISA
  * 
- * 这个程序实现了一个简化的LLM前向传播计算，包括：
- * 1. 矩阵-向量乘法（模拟线性层）
- * 2. 向量激活函数（使用ReLU）
- * 3. 多头注意力机制
- * 4. 使用FFT进行高级序列处理（频域卷积和特征提取）
- * 5. 层归一化（Layer Normalization）
- * 6. 位置编码（Positional Encoding）
- * 7. 经验动态建模（Empirical Dynamic Modeling）
+ * This program implements a simplified LLM forward propagation calculation, including:
+ * 1. Matrix-vector multiplication (simulating linear layers)
+ * 2. Vector activation functions (using ReLU)
+ * 3. Multi-head attention mechanism
+ * 4. Using FFT for advanced sequence processing (frequency domain convolution and feature extraction)
+ * 5. Layer Normalization
+ * 6. Positional Encoding
+ * 7. Empirical Dynamic Modeling (EDM)
  */
 
 #include "kisa.h"
@@ -17,21 +17,21 @@
 #include <math.h>
 #include <string.h>
 
-// 模型参数
-#define EMBEDDING_DIM 8  // 嵌入维度，与向量寄存器大小匹配
-#define HIDDEN_DIM 8     // 隐藏层维度
-#define SEQ_LENGTH 4     // 序列长度
-#define NUM_LAYERS 2     // 层数
-#define EPSILON 1e-5     // 归一化中防止除零的小值
-#define NUM_HEADS 2      // 注意力头数量
-#define HEAD_DIM 4       // 每个头的维度 (EMBEDDING_DIM / NUM_HEADS)
-#define POS_ENCODING_SCALE 100  // 位置编码缩放因子
+// Model parameters
+#define EMBEDDING_DIM 8  // Embedding dimension, matched with vector register size
+#define HIDDEN_DIM 8     // Hidden layer dimension
+#define SEQ_LENGTH 4     // Sequence length
+#define NUM_LAYERS 2     // Number of layers
+#define EPSILON 1e-5     // Small value to prevent division by zero in normalization
+#define NUM_HEADS 2      // Number of attention heads
+#define HEAD_DIM 4       // Dimension per head (EMBEDDING_DIM / NUM_HEADS)
+#define POS_ENCODING_SCALE 100  // Position encoding scale factor
 
-// EDM参数
-#define EDM_EMBEDDING_DIM 3     // EDM嵌入维度
-#define EDM_TIME_DELAY 1        // 时间延迟
-#define EDM_NUM_NEIGHBORS 3     // 近邻数量
-#define EDM_PREDICTION_STEPS 1  // 预测步数
+// EDM parameters
+#define EDM_EMBEDDING_DIM 3     // EDM embedding dimension
+#define EDM_TIME_DELAY 1        // Time delay
+#define EDM_NUM_NEIGHBORS 3     // Number of nearest neighbors
+#define EDM_PREDICTION_STEPS 1  // Prediction steps
 
 // 辅助函数：获取向量元素
 static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
@@ -144,7 +144,7 @@ void layer_normalization(vector_reg_t* result, vector_reg_t* input) {
         set_vector_element(result, i, normalized);
     }
     
-    printf("层归一化 - 均值: %d, 标准差: %d\n", mean, std_dev);
+    printf("Layer Normalization - Mean: %d, Standard Deviation: %d\n", mean, std_dev);
 }
 
 // 辅助函数：矩阵-向量乘法（简化版，假设矩阵已经按行存储在向量寄存器中）
@@ -231,7 +231,7 @@ void frequency_domain_convolution(vector_reg_t* result, vector_reg_t* input, vec
     // 3. 应用IFFT得到时域结果
     vector_ifft(result, &conv_result);
     
-    printf("频域卷积完成\n");
+    printf("Frequency Domain Convolution completed\n");
 }
 
 // 新增：频域特征提取
@@ -289,7 +289,7 @@ void extract_frequency_features(vector_reg_t* result, vector_reg_t* input) {
     // 4. 应用IFFT得到增强后的时域信号
     vector_ifft(result, &fft_result);
     
-    printf("频域特征提取 - 低频能量: %d, 中频能量: %d, 高频能量: %d\n", 
+    printf("Frequency Domain Feature Extraction - Low Frequency Energy: %d, Mid Frequency Energy: %d, High Frequency Energy: %d\n", 
            low_freq_energy, mid_freq_energy, high_freq_energy);
 }
 
@@ -300,12 +300,12 @@ void advanced_fft_processing(vector_reg_t* result, vector_reg_t* input, int laye
     // 1. 创建卷积核（简化为不同的模式）
     int32_t kernel_values[VECTOR_LENGTH];
     if(layer % 2 == 0) {
-        // 低通滤波器模式
+        // Low Pass Filter mode
         for(int i = 0; i < VECTOR_LENGTH; i++) {
             kernel_values[i] = (i < VECTOR_LENGTH/2) ? 100 : 10;
         }
     } else {
-        // 高通滤波器模式
+        // High Pass Filter mode
         for(int i = 0; i < VECTOR_LENGTH; i++) {
             kernel_values[i] = (i >= VECTOR_LENGTH/2) ? 100 : 10;
         }
@@ -328,7 +328,7 @@ void advanced_fft_processing(vector_reg_t* result, vector_reg_t* input, int laye
     }
 #endif
     
-    printf("高级FFT处理完成\n");
+    printf("Advanced FFT Processing completed\n");
 }
 
 // 新增：多头注意力机制
@@ -365,17 +365,17 @@ void multi_head_attention(vector_reg_t* result,
     
     // 1. 将查询、键、值分割为多个头
     for(int h = 0; h < NUM_HEADS; h++) {
-        // 简化：我们只是将向量分成几个部分
+        // Simplified: We just split the vector into several parts
         for(int i = 0; i < HEAD_DIM; i++) {
-            // 查询向量分割
+            // Query vector split
             int32_t q_val = get_vector_element(query, h * HEAD_DIM + i);
             set_vector_element(&q_heads[h], i, q_val);
             
-            // 键向量分割
+            // Key vector split
             int32_t k_val = get_vector_element(key, h * HEAD_DIM + i);
             set_vector_element(&k_heads[h], i, k_val);
             
-            // 值向量分割
+            // Value vector split
             int32_t v_val = get_vector_element(value, h * HEAD_DIM + i);
             set_vector_element(&v_heads[h], i, v_val);
         }
@@ -383,7 +383,7 @@ void multi_head_attention(vector_reg_t* result,
     
     // 2. 对每个头应用注意力机制
     for(int h = 0; h < NUM_HEADS; h++) {
-        printf("处理注意力头 %d\n", h + 1);
+        printf("Processing attention head %d\n", h + 1);
         single_head_attention(&head_results[h], &q_heads[h], &k_heads[h], &v_heads[h]);
     }
     
@@ -407,7 +407,7 @@ void multi_head_attention(vector_reg_t* result,
     // 4. 应用最终的线性投影
     matrix_vector_mul(result, weights_proj, &concat_result);
     
-    printf("多头注意力完成\n");
+    printf("Multi-Head Attention completed\n");
 }
 
 // 新增：位置编码函数
@@ -427,27 +427,27 @@ void add_positional_encoding(vector_reg_t* result, vector_reg_t* input, int posi
         // 计算位置编码
         int32_t pos_enc;
         if(i % 2 == 0) {
-            // 使用正弦函数对偶数位置
+            // Use sine function for even positions
             pos_enc = (int32_t)(sin(position / pow(10000, i / (double)EMBEDDING_DIM)) * POS_ENCODING_SCALE);
         } else {
-            // 使用余弦函数对奇数位置
+            // Use cosine function for odd positions
             pos_enc = (int32_t)(cos(position / pow(10000, (i - 1) / (double)EMBEDDING_DIM)) * POS_ENCODING_SCALE);
         }
         
-        // 将位置编码添加到输入
+        // Add positional encoding to input
         int32_t val = get_vector_element(result, i) + pos_enc;
         set_vector_element(result, i, val);
     }
     
-    printf("添加位置编码 %d: ", position);
-    print_vector("位置编码后", result);
+    printf("Added positional encoding %d: ", position);
+    print_vector("Positional Encoding Result", result);
 }
 
 // 新增：EDM时间延迟嵌入
 void time_delay_embedding(vector_reg_t* result, vector_reg_t* input, int delay, int embedding_dim) {
-    printf("执行时间延迟嵌入 (延迟=%d, 嵌入维度=%d)\n", delay, embedding_dim);
+    printf("Executing Time Delay Embedding (Delay=%d, Embedding Dimension=%d)\n", delay, embedding_dim);
     
-    // 初始化结果向量为零
+    // Initialize result vector to zero
 #ifdef __aarch64__
     result->low = vdupq_n_s32(0);
     result->high = vdupq_n_s32(0);
@@ -457,20 +457,20 @@ void time_delay_embedding(vector_reg_t* result, vector_reg_t* input, int delay, 
     }
 #endif
     
-    // 对于向量的每个元素，创建延迟嵌入
-    // 注意：这里我们只使用向量的前embedding_dim个元素
+    // For each element of the vector, create time delay embedding
+    // Note: Here we only use the first embedding_dim elements of the vector
     for(int i = 0; i < embedding_dim; i++) {
-        // 计算当前时间点
+        // Calculate current time point
         int time_point = i * delay;
         
-        // 如果时间点在向量范围内
+        // If time point is within vector range
         if(time_point < VECTOR_LENGTH) {
             int32_t value = get_vector_element(input, time_point);
             set_vector_element(result, i, value);
         }
     }
     
-    print_vector("时间延迟嵌入结果", result);
+    print_vector("Time Delay Embedding Result", result);
 }
 
 // 新增：计算欧几里得距离
@@ -489,9 +489,9 @@ int32_t euclidean_distance(vector_reg_t* v1, vector_reg_t* v2, int dim) {
 void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target, 
                            vector_reg_t library[], int library_size, 
                            int num_neighbors, int embedding_dim) {
-    printf("执行近邻搜索 (库大小=%d, 近邻数=%d)\n", library_size, num_neighbors);
+    printf("Executing Nearest Neighbor Search (Library Size=%d, Number of Neighbors=%d)\n", library_size, num_neighbors);
     
-    // 距离数组
+    // Distance array
     typedef struct {
         int index;
         int32_t distance;
@@ -499,13 +499,13 @@ void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target,
     
     DistanceItem* distances = (DistanceItem*)malloc(library_size * sizeof(DistanceItem));
     
-    // 计算目标向量与库中每个向量的距离
+    // Calculate Euclidean distance between target vector and each vector in library
     for(int i = 0; i < library_size; i++) {
         distances[i].index = i;
         distances[i].distance = euclidean_distance(target, &library[i], embedding_dim);
     }
     
-    // 简单的冒泡排序找出最近的邻居
+    // Simple bubble sort to find nearest neighbors
     for(int i = 0; i < library_size - 1; i++) {
         for(int j = 0; j < library_size - i - 1; j++) {
             if(distances[j].distance > distances[j + 1].distance) {
@@ -516,10 +516,10 @@ void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target,
         }
     }
     
-    // 获取最近的邻居索引
+    // Get nearest neighbor indices
     for(int i = 0; i < num_neighbors && i < library_size; i++) {
         neighbor_indices[i] = distances[i].index;
-        printf("近邻 %d: 索引 %d, 距离 %d\n", i+1, neighbor_indices[i], distances[i].distance);
+        printf("Neighbor %d: Index %d, Distance %d\n", i+1, neighbor_indices[i], distances[i].distance);
     }
     
     free(distances);
@@ -529,9 +529,9 @@ void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target,
 void edm_predict(vector_reg_t* result, vector_reg_t* current_state, 
                 vector_reg_t library[], int library_size, 
                 int num_neighbors, int embedding_dim, int prediction_steps) {
-    printf("执行EDM预测 (预测步数=%d)\n", prediction_steps);
+    printf("Executing EDM Prediction (Prediction Steps=%d)\n", prediction_steps);
     
-    // 初始化结果向量为零
+    // Initialize result vector to zero
 #ifdef __aarch64__
     result->low = vdupq_n_s32(0);
     result->high = vdupq_n_s32(0);
@@ -541,24 +541,24 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
     }
 #endif
     
-    // 找到最近的邻居
+    // Find nearest neighbors
     int* neighbor_indices = (int*)malloc(num_neighbors * sizeof(int));
     find_nearest_neighbors(neighbor_indices, current_state, library, library_size, num_neighbors, embedding_dim);
     
-    // 基于近邻的加权平均进行预测
+    // Weighted average prediction based on nearest neighbors
     int32_t total_weight = 0;
     
     for(int i = 0; i < num_neighbors; i++) {
         int neighbor_idx = neighbor_indices[i];
         
-        // 计算权重（简化为距离的倒数）
+        // Calculate weight (simplified as inverse of distance)
         int32_t distance = euclidean_distance(current_state, &library[neighbor_idx], embedding_dim);
-        int32_t weight = distance == 0 ? 1000 : 1000 / distance; // 避免除以零
+        int32_t weight = distance == 0 ? 1000 : 1000 / distance; // Avoid division by zero
         total_weight += weight;
         
-        // 对于每个预测步骤，将未来值加入结果
+        // For each prediction step, add future value to result
         for(int step = 1; step <= prediction_steps; step++) {
-            // 确保我们不会超出库的范围
+            // Ensure we don't go out of range of library
             if(neighbor_idx + step < library_size) {
                 for(int j = 0; j < VECTOR_LENGTH; j++) {
                     int32_t future_val = get_vector_element(&library[neighbor_idx + step], j);
@@ -569,7 +569,7 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
         }
     }
     
-    // 归一化结果
+    // Normalize result
     if(total_weight > 0) {
         for(int j = 0; j < VECTOR_LENGTH; j++) {
             int32_t val = get_vector_element(result, j);
@@ -578,20 +578,20 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
     }
     
     free(neighbor_indices);
-    print_vector("EDM预测结果", result);
+    print_vector("EDM Prediction Result", result);
 }
 
 // 新增：完整的EDM处理流程
 void apply_empirical_dynamic_modeling(vector_reg_t* result, vector_reg_t* input) {
-    printf("\n=== 应用经验动态建模 (EDM) ===\n");
+    printf("\n=== Applying Empirical Dynamic Modeling (EDM) ===\n");
     
-    // 1. 创建一个简单的时间序列库（在实际应用中，这将是历史数据）
+    // 1. Create a simple time series library (in practice, this would be historical data)
     int library_size = VECTOR_LENGTH;
     vector_reg_t* library = (vector_reg_t*)malloc(library_size * sizeof(vector_reg_t));
     
-    // 为简化起见，我们使用输入向量的移位版本作为库
+    // For simplicity, we use a shifted version of the input vector as the library
     for(int i = 0; i < library_size; i++) {
-        // 创建移位版本
+        // Create shifted version
 #ifdef __aarch64__
         library[i].low = vdupq_n_s32(0);
         library[i].high = vdupq_n_s32(0);
@@ -608,28 +608,28 @@ void apply_empirical_dynamic_modeling(vector_reg_t* result, vector_reg_t* input)
         }
     }
     
-    // 2. 对当前状态进行时间延迟嵌入
+    // 2. Perform time delay embedding on current state
     vector_reg_t embedded_state;
     time_delay_embedding(&embedded_state, input, EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
     
-    // 3. 对库中的每个向量进行时间延迟嵌入
+    // 3. Perform time delay embedding on each vector in library
     vector_reg_t* embedded_library = (vector_reg_t*)malloc(library_size * sizeof(vector_reg_t));
     for(int i = 0; i < library_size; i++) {
         time_delay_embedding(&embedded_library[i], &library[i], EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
     }
     
-    // 4. 使用EDM进行预测
+    // 4. Use EDM for prediction
     edm_predict(result, &embedded_state, embedded_library, library_size, 
                EDM_NUM_NEIGHBORS, EDM_EMBEDDING_DIM, EDM_PREDICTION_STEPS);
     
-    // 5. 清理
+    // 5. Clean up
     free(library);
     free(embedded_library);
     
-    printf("EDM处理完成\n");
+    printf("EDM Processing completed\n");
 }
 
-// 主函数：实现简化的Transformer层
+// Main function: Implement simplified Transformer layer
 void transformer_layer(vector_reg_t* output, vector_reg_t* input, 
                       vector_reg_t weights_q[EMBEDDING_DIM],
                       vector_reg_t weights_k[EMBEDDING_DIM],
@@ -639,60 +639,60 @@ void transformer_layer(vector_reg_t* output, vector_reg_t* input,
     
     vector_reg_t query, key, value, attention_output, temp, normalized, pos_encoded;
     
-    // 0. 添加位置编码
+    // 0. Add positional encoding
     add_positional_encoding(&pos_encoded, input, position);
     
-    // 1. 计算查询、键、值向量
+    // 1. Calculate query, key, value vectors
     matrix_vector_mul(&query, weights_q, &pos_encoded);
     matrix_vector_mul(&key, weights_k, &pos_encoded);
     matrix_vector_mul(&value, weights_v, &pos_encoded);
     
-    // 2. 应用多头注意力机制
+    // 2. Apply multi-head attention mechanism
     multi_head_attention(&attention_output, &query, &key, &value, weights_out);
     
-    // 3. 应用输出投影
+    // 3. Apply output projection
     matrix_vector_mul(&temp, weights_out, &attention_output);
     
-    // 4. 残差连接
+    // 4. Residual connection
     vector_add(output, &temp, &pos_encoded);
     
-    // 5. 应用层归一化
+    // 5. Apply layer normalization
     layer_normalization(&normalized, output);
     
-    // 6. 应用ReLU激活函数
+    // 6. Apply ReLU activation function
     relu_activation(output, &normalized);
     
-    // 7. 使用高级FFT处理
+    // 7. Use advanced FFT processing
     advanced_fft_processing(output, output, position);
     
-    // 8. 应用经验动态建模（EDM）
+    // 8. Apply Empirical Dynamic Modeling (EDM)
     vector_reg_t edm_result;
     apply_empirical_dynamic_modeling(&edm_result, output);
     
-    // 9. 将EDM结果与当前输出结合
+    // 9. Combine EDM result with current output
     vector_add(output, output, &edm_result);
 }
 
-// 主函数
+// Main function
 int main() {
-    printf("=== 简化版LLM计算演示 ===\n\n");
+    printf("=== Simplified LLM Calculation Demonstration ===\n\n");
     
-    // 初始化执行单元
+    // Initialize execution unit
     init_execution_unit();
     
-    // 初始化输入向量
+    // Initialize input vector
     vector_reg_t input;
     int32_t input_values[VECTOR_LENGTH] = {10, 20, 30, 40, 50, 60, 70, 80};
     init_vector(&input, input_values);
-    print_vector("输入向量", &input);
+    print_vector("Input Vector", &input);
     
-    // 初始化权重矩阵（简化为随机值）
+    // Initialize weight matrices (simplified as random values)
     vector_reg_t weights_q[EMBEDDING_DIM];
     vector_reg_t weights_k[EMBEDDING_DIM];
     vector_reg_t weights_v[EMBEDDING_DIM];
     vector_reg_t weights_out[EMBEDDING_DIM];
     
-    // 初始化权重（简化为简单模式）
+    // Initialize weights (simplified as simple mode)
     for(int i = 0; i < EMBEDDING_DIM; i++) {
         int32_t w_q[VECTOR_LENGTH], w_k[VECTOR_LENGTH], w_v[VECTOR_LENGTH], w_out[VECTOR_LENGTH];
         
@@ -709,33 +709,33 @@ int main() {
         init_vector(&weights_out[i], w_out);
     }
     
-    // 输出向量
+    // Output vector
     vector_reg_t output = input;
     
-    // 应用多层Transformer
-    printf("\n开始LLM计算...\n");
+    // Apply multi-layer Transformer
+    printf("\nStarting LLM Calculation...\n");
     for(int layer = 0; layer < NUM_LAYERS; layer++) {
-        printf("\n=== 第 %d 层 ===\n", layer + 1);
+        printf("\n=== Layer %d ===\n", layer + 1);
         
-        // 为每一层使用不同的位置编码
+        // Use different positional encoding for each layer
         transformer_layer(&output, &output, weights_q, weights_k, weights_v, weights_out, layer);
         
-        print_vector("层输出", &output);
+        print_vector("Layer Output", &output);
     }
     
-    // 最终输出
-    printf("\n=== 最终输出 ===\n");
-    print_vector("LLM输出向量", &output);
+    // Final output
+    printf("\n=== Final Output ===\n");
+    print_vector("LLM Output Vector", &output);
     
-    // 计算输出的统计信息
+    // Calculate output statistics
     int32_t sum = vector_reduce(&output, RED_SUM);
     int32_t max = vector_reduce(&output, RED_MAX);
     int32_t min = vector_reduce(&output, RED_MIN);
     
-    printf("\n输出统计信息:\n");
-    printf("总和: %d\n", sum);
-    printf("最大值: %d\n", max);
-    printf("最小值: %d\n", min);
+    printf("\nOutput Statistics:\n");
+    printf("Sum: %d\n", sum);
+    printf("Max: %d\n", max);
+    printf("Min: %d\n", min);
     
     return 0;
 } 

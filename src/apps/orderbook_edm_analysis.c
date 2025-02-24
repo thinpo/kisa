@@ -1,33 +1,33 @@
 /**
- * orderbook_edm_analysis.c - 使用经验动态建模(EDM)分析订单簿事件的泊松到达率
+ * orderbook_edm_analysis.c - Using Empirical Dynamic Modeling (EDM) to analyze Poisson arrival rates of orderbook events
  * 
- * 这个程序模拟订单簿事件流，并使用EDM分析不同类型事件的到达率和模式：
- * 1. 新订单事件 (New)
- * 2. 修改订单事件 (Modify)
- * 3. 删除订单事件 (Delete)
- * 4. 交易执行事件 (Execute)
+ * This program simulates orderbook event flows and uses EDM to analyze arrival rates and patterns of different event types:
+ * 1. New order events (New)
+ * 2. Modify order events (Modify)
+ * 3. Delete order events (Delete)
+ * 4. Trade execution events (Execute)
  * 
- * 程序使用EDM来预测未来事件率并分析事件之间的动态关系。
+ * The program uses EDM to predict future event rates and analyze dynamic relationships between events.
  */
 
-#include "kisa.h"
+#include "../../include/kisa.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
 #include <time.h>
 
-// 参数定义
-#define MAX_EVENTS 1000          // 最大事件数
-#define VECTOR_SIZE 8            // 向量大小
-#define EVENT_TYPES 4            // 事件类型数量
-#define TIME_WINDOW 100          // 时间窗口大小
-#define EDM_EMBEDDING_DIM 3      // EDM嵌入维度
-#define EDM_TIME_DELAY 1         // 时间延迟
-#define EDM_NUM_NEIGHBORS 3      // 近邻数量
-#define EDM_PREDICTION_STEPS 5   // 预测步数
+// Parameter definitions
+#define MAX_EVENTS 1000          // Maximum number of events
+#define VECTOR_SIZE 8            // Vector size
+#define EVENT_TYPES 4            // Number of event types
+#define TIME_WINDOW 100          // Time window size
+#define EDM_EMBEDDING_DIM 3      // EDM embedding dimension
+#define EDM_TIME_DELAY 1         // Time delay
+#define EDM_NUM_NEIGHBORS 3      // Number of neighbors
+#define EDM_PREDICTION_STEPS 5   // Prediction steps
 
-// 事件类型枚举
+// Event type enumeration
 typedef enum {
     EVENT_NEW = 0,
     EVENT_MODIFY = 1,
@@ -35,7 +35,7 @@ typedef enum {
     EVENT_EXECUTE = 3
 } EventType;
 
-// 事件结构体
+// Event structure
 typedef struct {
     EventType type;
     int timestamp;
@@ -43,7 +43,7 @@ typedef struct {
     int quantity;
 } OrderEvent;
 
-// 事件率结构体
+// Event rate structure
 typedef struct {
     int window_start;
     int window_end;
@@ -51,7 +51,7 @@ typedef struct {
     double rates[EVENT_TYPES];
 } EventRates;
 
-// 辅助函数：获取向量元素
+// Helper function: Get vector element
 static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
 #ifdef __aarch64__
     switch(i) {
@@ -70,7 +70,7 @@ static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
 #endif
 }
 
-// 辅助函数：设置向量元素
+// Helper function: Set vector element
 static inline void set_vector_element(vector_reg_t* reg, int i, int32_t value) {
 #ifdef __aarch64__
     switch(i) {
@@ -88,7 +88,7 @@ static inline void set_vector_element(vector_reg_t* reg, int i, int32_t value) {
 #endif
 }
 
-// 辅助函数：打印向量内容
+// Helper function: Print vector content
 void print_vector(const char* name, const vector_reg_t* v) {
     printf("%s: [", name);
     for(int i = 0; i < VECTOR_LENGTH; i++) {
@@ -97,7 +97,7 @@ void print_vector(const char* name, const vector_reg_t* v) {
     printf("]\n");
 }
 
-// 辅助函数：初始化向量
+// Helper function: Initialize vector
 void init_vector(vector_reg_t* v, int32_t values[VECTOR_LENGTH]) {
 #ifdef __aarch64__
     v->low = vdupq_n_s32(0);
@@ -112,40 +112,40 @@ void init_vector(vector_reg_t* v, int32_t values[VECTOR_LENGTH]) {
 #endif
 }
 
-// 生成模拟的订单簿事件
+// Generate simulated orderbook events
 void generate_simulated_events(OrderEvent events[], int num_events) {
     srand(time(NULL));
     
-    // 设置不同事件类型的基础泊松率
-    double base_rates[EVENT_TYPES] = {0.4, 0.3, 0.2, 0.1}; // 新订单、修改、删除、执行的基础率
+    // Set base Poisson rates for different event types
+    double base_rates[EVENT_TYPES] = {0.4, 0.3, 0.2, 0.1}; // Base rates for new, modify, delete, execute
     
-    // 为每种事件类型生成周期性变化
-    double amplitudes[EVENT_TYPES] = {0.2, 0.15, 0.1, 0.05}; // 振幅
-    double periods[EVENT_TYPES] = {200, 150, 100, 50}; // 周期
+    // Set amplitudes and periods for periodic changes
+    double amplitudes[EVENT_TYPES] = {0.2, 0.15, 0.1, 0.05}; // Amplitudes
+    double periods[EVENT_TYPES] = {200, 150, 100, 50}; // Periods
     
     int current_time = 0;
     for (int i = 0; i < num_events; i++) {
-        // 计算每种事件类型的当前概率（基础率+周期变化）
+        // Calculate current probabilities for each event type (base rate + periodic change)
         double probs[EVENT_TYPES];
         double total_prob = 0;
         
         for (int j = 0; j < EVENT_TYPES; j++) {
-            // 添加周期性变化
+            // Add periodic change
             probs[j] = base_rates[j] + amplitudes[j] * sin(2 * M_PI * current_time / periods[j]);
-            // 确保概率非负
+            // Ensure non-negative probabilities
             if (probs[j] < 0.01) probs[j] = 0.01;
             total_prob += probs[j];
         }
         
-        // 归一化概率
+        // Normalize probabilities
         for (int j = 0; j < EVENT_TYPES; j++) {
             probs[j] /= total_prob;
         }
         
-        // 随机选择事件类型
+        // Randomly select event type
         double r = (double)rand() / RAND_MAX;
         double cumulative = 0;
-        EventType selected_type = EVENT_NEW; // 默认
+        EventType selected_type = EVENT_NEW; // Default
         
         for (int j = 0; j < EVENT_TYPES; j++) {
             cumulative += probs[j];
@@ -155,24 +155,24 @@ void generate_simulated_events(OrderEvent events[], int num_events) {
             }
         }
         
-        // 生成事件
+        // Generate event
         events[i].type = selected_type;
         events[i].timestamp = current_time;
-        events[i].price = 100.0 + (rand() % 1000) / 100.0; // 100-110范围内的价格
-        events[i].quantity = 1 + rand() % 100; // 1-100范围内的数量
+        events[i].price = 100.0 + (rand() % 1000) / 100.0; // Price between 100-110
+        events[i].quantity = 1 + rand() % 100; // Quantity between 1-100
         
-        // 更新时间（使用泊松过程模拟事件间隔）
-        double lambda = 0.5; // 平均事件率
+        // Update time (using Poisson process to simulate event intervals)
+        double lambda = 0.5; // Average event rate
         double u = (double)rand() / RAND_MAX;
-        int time_increment = (int)(-log(u) / lambda); // 泊松间隔
+        int time_increment = (int)(-log(u) / lambda); // Poisson interval
         if (time_increment < 1) time_increment = 1;
         current_time += time_increment;
     }
     
-    printf("生成了%d个模拟订单簿事件\n", num_events);
+    printf("Generated %d simulated orderbook events\n", num_events);
 }
 
-// 计算时间窗口内的事件率
+// Calculate event rates within a time window
 void calculate_event_rates(OrderEvent events[], int num_events, EventRates rates[], int *num_rates) {
     if (num_events == 0) {
         *num_rates = 0;
@@ -182,11 +182,11 @@ void calculate_event_rates(OrderEvent events[], int num_events, EventRates rates
     int start_time = events[0].timestamp;
     int end_time = events[num_events-1].timestamp;
     
-    // 计算需要多少个时间窗口
+    // Calculate how many time windows are needed
     int num_windows = (end_time - start_time) / TIME_WINDOW + 1;
     *num_rates = num_windows;
     
-    // 初始化事件率数组
+    // Initialize event rates array
     for (int i = 0; i < num_windows; i++) {
         rates[i].window_start = start_time + i * TIME_WINDOW;
         rates[i].window_end = rates[i].window_start + TIME_WINDOW - 1;
@@ -197,7 +197,7 @@ void calculate_event_rates(OrderEvent events[], int num_events, EventRates rates
         }
     }
     
-    // 统计每个窗口内的事件数量
+    // Count events in each time window
     for (int i = 0; i < num_events; i++) {
         int window_idx = (events[i].timestamp - start_time) / TIME_WINDOW;
         if (window_idx >= 0 && window_idx < num_windows) {
@@ -205,19 +205,19 @@ void calculate_event_rates(OrderEvent events[], int num_events, EventRates rates
         }
     }
     
-    // 计算事件率
+    // Calculate event rates
     for (int i = 0; i < num_windows; i++) {
         for (int j = 0; j < EVENT_TYPES; j++) {
             rates[i].rates[j] = (double)rates[i].counts[j] / TIME_WINDOW;
         }
     }
     
-    printf("计算了%d个时间窗口的事件率\n", num_windows);
+    printf("Calculated event rates for %d time windows\n", num_windows);
 }
 
-// 将事件率转换为向量
+// Convert event rates to vector
 void event_rates_to_vector(EventRates rates[], int window_idx, vector_reg_t* result) {
-    // 初始化结果向量为零
+    // Initialize result vector to zero
 #ifdef __aarch64__
     result->low = vdupq_n_s32(0);
     result->high = vdupq_n_s32(0);
@@ -227,24 +227,24 @@ void event_rates_to_vector(EventRates rates[], int window_idx, vector_reg_t* res
     }
 #endif
     
-    // 将事件率转换为向量元素
-    // 前4个元素是各类事件的率
+    // Convert event rates to vector elements
+    // First 4 elements are rates of different event types
     for (int i = 0; i < EVENT_TYPES && i < VECTOR_LENGTH; i++) {
-        int32_t rate_scaled = (int32_t)(rates[window_idx].rates[i] * 1000); // 缩放以转换为整数
+        int32_t rate_scaled = (int32_t)(rates[window_idx].rates[i] * 1000); // Scale to convert to integer
         set_vector_element(result, i, rate_scaled);
     }
     
-    // 后4个元素是各类事件的计数
+    // Next 4 elements are counts of different event types
     for (int i = 0; i < EVENT_TYPES && i + EVENT_TYPES < VECTOR_LENGTH; i++) {
         set_vector_element(result, i + EVENT_TYPES, rates[window_idx].counts[i]);
     }
 }
 
-// EDM时间延迟嵌入
+// EDM time delay embedding
 void time_delay_embedding(vector_reg_t* result, vector_reg_t* input, int delay, int embedding_dim) {
-    printf("执行时间延迟嵌入 (延迟=%d, 嵌入维度=%d)\n", delay, embedding_dim);
+    printf("Executing time delay embedding (delay=%d, embedding dimension=%d)\n", delay, embedding_dim);
     
-    // 初始化结果向量为零
+    // Initialize result vector to zero
 #ifdef __aarch64__
     result->low = vdupq_n_s32(0);
     result->high = vdupq_n_s32(0);
@@ -254,22 +254,22 @@ void time_delay_embedding(vector_reg_t* result, vector_reg_t* input, int delay, 
     }
 #endif
     
-    // 对于向量的每个元素，创建延迟嵌入
+    // For each element of the vector, create delay embedding
     for(int i = 0; i < embedding_dim; i++) {
-        // 计算当前时间点
+        // Calculate current time point
         int time_point = i * delay;
         
-        // 如果时间点在向量范围内
+        // If time point is within vector range
         if(time_point < VECTOR_LENGTH) {
             int32_t value = get_vector_element(input, time_point);
             set_vector_element(result, i, value);
         }
     }
     
-    print_vector("时间延迟嵌入结果", result);
+    print_vector("Time delay embedding result", result);
 }
 
-// 计算欧几里得距离
+// Calculate Euclidean distance
 int32_t euclidean_distance(vector_reg_t* v1, vector_reg_t* v2, int dim) {
     int64_t sum_sq = 0;
     
@@ -281,13 +281,13 @@ int32_t euclidean_distance(vector_reg_t* v1, vector_reg_t* v2, int dim) {
     return (int32_t)sqrt((double)sum_sq);
 }
 
-// EDM近邻搜索
+// EDM nearest neighbor search
 void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target, 
                            vector_reg_t library[], int library_size, 
                            int num_neighbors, int embedding_dim) {
-    printf("执行近邻搜索 (库大小=%d, 近邻数=%d)\n", library_size, num_neighbors);
+    printf("Executing nearest neighbor search (library size=%d, number of neighbors=%d)\n", library_size, num_neighbors);
     
-    // 距离数组
+    // Distance array
     typedef struct {
         int index;
         int32_t distance;
@@ -295,13 +295,13 @@ void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target,
     
     DistanceItem* distances = (DistanceItem*)malloc(library_size * sizeof(DistanceItem));
     
-    // 计算目标向量与库中每个向量的距离
+    // Calculate distance between target vector and each vector in library
     for(int i = 0; i < library_size; i++) {
         distances[i].index = i;
         distances[i].distance = euclidean_distance(target, &library[i], embedding_dim);
     }
     
-    // 简单的冒泡排序找出最近的邻居
+    // Simple bubble sort to find nearest neighbors
     for(int i = 0; i < library_size - 1; i++) {
         for(int j = 0; j < library_size - i - 1; j++) {
             if(distances[j].distance > distances[j + 1].distance) {
@@ -312,22 +312,22 @@ void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target,
         }
     }
     
-    // 获取最近的邻居索引
+    // Get nearest neighbor indices
     for(int i = 0; i < num_neighbors && i < library_size; i++) {
         neighbor_indices[i] = distances[i].index;
-        printf("近邻 %d: 索引 %d, 距离 %d\n", i+1, neighbor_indices[i], distances[i].distance);
+        printf("Neighbor %d: Index %d, Distance %d\n", i+1, neighbor_indices[i], distances[i].distance);
     }
     
     free(distances);
 }
 
-// EDM预测
+// EDM prediction
 void edm_predict(vector_reg_t* result, vector_reg_t* current_state, 
                 vector_reg_t library[], int library_size, 
                 int num_neighbors, int embedding_dim, int prediction_steps) {
-    printf("执行EDM预测 (预测步数=%d)\n", prediction_steps);
+    printf("Executing EDM prediction (prediction steps=%d)\n", prediction_steps);
     
-    // 初始化结果向量为零
+    // Initialize result vector to zero
 #ifdef __aarch64__
     result->low = vdupq_n_s32(0);
     result->high = vdupq_n_s32(0);
@@ -337,24 +337,24 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
     }
 #endif
     
-    // 找到最近的邻居
+    // Find nearest neighbors
     int* neighbor_indices = (int*)malloc(num_neighbors * sizeof(int));
     find_nearest_neighbors(neighbor_indices, current_state, library, library_size, num_neighbors, embedding_dim);
     
-    // 基于近邻的加权平均进行预测
+    // Based on weighted average of nearest neighbors
     int32_t total_weight = 0;
     
     for(int i = 0; i < num_neighbors; i++) {
         int neighbor_idx = neighbor_indices[i];
         
-        // 计算权重（简化为距离的倒数）
+        // Calculate weight (simplified as inverse of distance)
         int32_t distance = euclidean_distance(current_state, &library[neighbor_idx], embedding_dim);
-        int32_t weight = distance == 0 ? 1000 : 1000 / distance; // 避免除以零
+        int32_t weight = distance == 0 ? 1000 : 1000 / distance; // Avoid division by zero
         total_weight += weight;
         
-        // 对于每个预测步骤，将未来值加入结果
+        // For each prediction step, add future value to result
         for(int step = 1; step <= prediction_steps; step++) {
-            // 确保我们不会超出库的范围
+            // Ensure we don't go out of library range
             if(neighbor_idx + step < library_size) {
                 for(int j = 0; j < VECTOR_LENGTH; j++) {
                     int32_t future_val = get_vector_element(&library[neighbor_idx + step], j);
@@ -365,7 +365,7 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
         }
     }
     
-    // 归一化结果
+    // Normalize result
     if(total_weight > 0) {
         for(int j = 0; j < VECTOR_LENGTH; j++) {
             int32_t val = get_vector_element(result, j);
@@ -374,30 +374,30 @@ void edm_predict(vector_reg_t* result, vector_reg_t* current_state,
     }
     
     free(neighbor_indices);
-    print_vector("EDM预测结果", result);
+    print_vector("EDM prediction result", result);
 }
 
-// 分析事件率的自相关性
+// Analyze autocorrelation of event rates
 void analyze_autocorrelation(EventRates rates[], int num_rates) {
-    printf("\n=== 事件率自相关性分析 ===\n");
+    printf("\n=== Event rates autocorrelation analysis ===\n");
     
-    // 最大滞后期
+    // Maximum lag period
     int max_lag = num_rates / 4;
     if (max_lag > 20) max_lag = 20;
     
-    // 对每种事件类型计算自相关
+    // Calculate autocorrelation for each event type
     for (int type = 0; type < EVENT_TYPES; type++) {
-        const char* event_names[] = {"新订单", "修改订单", "删除订单", "交易执行"};
-        printf("\n%s事件的自相关系数:\n", event_names[type]);
+        const char* event_names[] = {"New order", "Modify order", "Delete order", "Trade execution"};
+        printf("\nAutocorrelation coefficient of %s events:\n", event_names[type]);
         
-        // 计算均值
+        // Calculate mean
         double mean = 0.0;
         for (int i = 0; i < num_rates; i++) {
             mean += rates[i].rates[type];
         }
         mean /= num_rates;
         
-        // 计算方差
+        // Calculate variance
         double variance = 0.0;
         for (int i = 0; i < num_rates; i++) {
             double diff = rates[i].rates[type] - mean;
@@ -405,7 +405,7 @@ void analyze_autocorrelation(EventRates rates[], int num_rates) {
         }
         variance /= num_rates;
         
-        // 计算不同滞后期的自相关
+        // Calculate autocorrelation for different lag periods
         for (int lag = 1; lag <= max_lag; lag++) {
             double autocorr = 0.0;
             for (int i = 0; i < num_rates - lag; i++) {
@@ -415,9 +415,9 @@ void analyze_autocorrelation(EventRates rates[], int num_rates) {
             }
             autocorr /= (num_rates - lag) * variance;
             
-            printf("滞后%d: %.4f", lag, autocorr);
+            printf("Lag %d: %.4f", lag, autocorr);
             
-            // 简单的可视化
+            // Simple visualization
             printf(" |");
             int bars = (int)(fabs(autocorr) * 40);
             for (int b = 0; b < bars; b++) {
@@ -428,13 +428,13 @@ void analyze_autocorrelation(EventRates rates[], int num_rates) {
     }
 }
 
-// 分析事件类型之间的相关性
+// Analyze correlation between event types
 void analyze_cross_correlation(EventRates rates[], int num_rates) {
-    printf("\n=== 事件类型间的相关性分析 ===\n");
+    printf("\n=== Event type correlation analysis ===\n");
     
-    const char* event_names[] = {"新订单", "修改订单", "删除订单", "交易执行"};
+    const char* event_names[] = {"New order", "Modify order", "Delete order", "Trade execution"};
     
-    // 计算每种事件类型的均值
+    // Calculate mean for each event type
     double means[EVENT_TYPES] = {0};
     for (int type = 0; type < EVENT_TYPES; type++) {
         for (int i = 0; i < num_rates; i++) {
@@ -443,7 +443,7 @@ void analyze_cross_correlation(EventRates rates[], int num_rates) {
         means[type] /= num_rates;
     }
     
-    // 计算每种事件类型的标准差
+    // Calculate standard deviation for each event type
     double stddevs[EVENT_TYPES] = {0};
     for (int type = 0; type < EVENT_TYPES; type++) {
         for (int i = 0; i < num_rates; i++) {
@@ -453,8 +453,8 @@ void analyze_cross_correlation(EventRates rates[], int num_rates) {
         stddevs[type] = sqrt(stddevs[type] / num_rates);
     }
     
-    // 计算事件类型之间的相关系数
-    printf("\n相关系数矩阵:\n");
+    // Calculate correlation coefficient between event types
+    printf("\nCorrelation coefficient matrix:\n");
     printf("%-12s", "");
     for (int type2 = 0; type2 < EVENT_TYPES; type2++) {
         printf("%-12s", event_names[type2]);
@@ -481,53 +481,53 @@ void analyze_cross_correlation(EventRates rates[], int num_rates) {
     }
 }
 
-// 使用EDM分析事件率
+// Analyze event rates using EDM
 void analyze_event_rates_with_edm(EventRates rates[], int num_rates) {
-    printf("\n=== 使用EDM分析事件率 ===\n");
+    printf("\n=== Analyzing event rates using EDM ===\n");
     
-    // 如果数据点太少，无法进行EDM分析
+    // If data points are too few, cannot perform EDM analysis
     if (num_rates < EDM_EMBEDDING_DIM + EDM_PREDICTION_STEPS) {
-        printf("数据点不足，无法进行EDM分析\n");
+        printf("Insufficient data points for EDM analysis\n");
         return;
     }
     
-    // 将事件率转换为向量序列
+    // Convert event rates to vector sequence
     vector_reg_t* rate_vectors = (vector_reg_t*)malloc(num_rates * sizeof(vector_reg_t));
     for (int i = 0; i < num_rates; i++) {
         event_rates_to_vector(rates, i, &rate_vectors[i]);
     }
     
-    // 创建嵌入库
+    // Create embedding library
     vector_reg_t* embedded_library = (vector_reg_t*)malloc(num_rates * sizeof(vector_reg_t));
     for (int i = 0; i < num_rates; i++) {
         time_delay_embedding(&embedded_library[i], &rate_vectors[i], EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
     }
     
-    // 对每种事件类型进行EDM预测
-    const char* event_names[] = {"新订单", "修改订单", "删除订单", "交易执行"};
+    // Perform EDM prediction for each event type
+    const char* event_names[] = {"New order", "Modify order", "Delete order", "Trade execution"};
     
     for (int type = 0; type < EVENT_TYPES; type++) {
-        printf("\n分析%s事件的动态:\n", event_names[type]);
+        printf("\nAnalyzing dynamic of %s events:\n", event_names[type]);
         
-        // 选择最后一个时间点进行预测
+        // Select last time point for prediction
         vector_reg_t current_state;
         time_delay_embedding(&current_state, &rate_vectors[num_rates-1], EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
         
-        // 使用EDM进行预测
+        // Use EDM for prediction
         vector_reg_t prediction;
         edm_predict(&prediction, &current_state, embedded_library, num_rates, 
                    EDM_NUM_NEIGHBORS, EDM_EMBEDDING_DIM, EDM_PREDICTION_STEPS);
         
-        // 提取该事件类型的预测率
+        // Extract predicted rate for this event type
         int32_t predicted_rate = get_vector_element(&prediction, type);
-        double actual_rate = (double)predicted_rate / 1000.0; // 转换回实际率
+        double actual_rate = (double)predicted_rate / 1000.0; // Convert back to actual rate
         
-        printf("%s事件的预测率: %.4f\n", event_names[type], actual_rate);
+        printf("%s event predicted rate: %.4f\n", event_names[type], actual_rate);
         
-        // 计算预测的非线性特性
-        printf("分析%s事件的非线性特性:\n", event_names[type]);
+        // Analyze nonlinear characteristics of the sequence
+        printf("Analyzing nonlinear characteristics of %s events:\n", event_names[type]);
         
-        // 计算实际序列的方差
+        // Calculate variance of actual sequence
         double mean = 0.0;
         for (int i = 0; i < num_rates; i++) {
             mean += rates[i].rates[type];
@@ -541,9 +541,9 @@ void analyze_event_rates_with_edm(EventRates rates[], int num_rates) {
         }
         variance /= num_rates;
         
-        printf("均值: %.4f, 方差: %.4f\n", mean, variance);
+        printf("Mean: %.4f, Variance: %.4f\n", mean, variance);
         
-        // 计算序列的非线性指标（简化版）
+        // Calculate nonlinear index of the sequence (simplified version)
         double nonlinearity = 0.0;
         for (int i = 1; i < num_rates; i++) {
             double diff = rates[i].rates[type] - rates[i-1].rates[type];
@@ -551,47 +551,47 @@ void analyze_event_rates_with_edm(EventRates rates[], int num_rates) {
         }
         nonlinearity /= (num_rates - 1);
         
-        printf("非线性指标: %.4f\n", nonlinearity);
+        printf("Nonlinear index: %.4f\n", nonlinearity);
         
-        // 判断是否符合泊松过程
-        // 对于泊松过程，方差应该接近均值
+        // Check if it fits Poisson process
+        // For Poisson process, variance should be close to mean
         double poisson_ratio = variance / mean;
-        printf("方差/均值比率: %.4f ", poisson_ratio);
+        printf("Variance/mean ratio: %.4f ", poisson_ratio);
         
         if (fabs(poisson_ratio - 1.0) < 0.2) {
-            printf("(接近1，符合泊松过程特性)\n");
+            printf("(close to 1, fits Poisson process characteristics)\n");
         } else if (poisson_ratio > 1.0) {
-            printf("(大于1，表现出过度分散，可能是集群到达)\n");
+            printf("(greater than 1, indicates overdispersion, possibly clustered arrival)\n");
         } else {
-            printf("(小于1，表现出欠分散，可能是规则到达)\n");
+            printf("(less than 1, indicates underdispersion, possibly regular arrival)\n");
         }
     }
     
-    // 清理
+    // Clean up
     free(rate_vectors);
     free(embedded_library);
 }
 
-// 主函数
+// Main function
 int main() {
-    printf("=== 订单簿事件泊松到达率分析 ===\n\n");
+    printf("=== Orderbook event Poisson arrival rate analysis ===\n\n");
     
-    // 初始化执行单元
+    // Initialize execution unit
     init_execution_unit();
     
-    // 生成模拟的订单簿事件
+    // Generate simulated orderbook events
     OrderEvent events[MAX_EVENTS];
     generate_simulated_events(events, MAX_EVENTS);
     
-    // 计算事件率
+    // Calculate event rates
     EventRates rates[MAX_EVENTS / TIME_WINDOW + 1];
     int num_rates;
     calculate_event_rates(events, MAX_EVENTS, rates, &num_rates);
     
-    // 打印事件率
-    printf("\n=== 事件率统计 ===\n");
+    // Print event rates
+    printf("\n=== Event rates statistics ===\n");
     printf("%-15s %-15s %-15s %-15s %-15s %-15s\n", 
-           "时间窗口", "新订单率", "修改订单率", "删除订单率", "交易执行率", "总事件率");
+           "Time window", "New order rate", "Modify order rate", "Delete order rate", "Trade execution rate", "Total event rate");
     
     for (int i = 0; i < num_rates; i++) {
         double total_rate = 0;
@@ -608,16 +608,16 @@ int main() {
                total_rate);
     }
     
-    // 分析事件率的自相关性
+    // Analyze autocorrelation of event rates
     analyze_autocorrelation(rates, num_rates);
     
-    // 分析事件类型之间的相关性
+    // Analyze correlation between event types
     analyze_cross_correlation(rates, num_rates);
     
-    // 使用EDM分析事件率
+    // Analyze event rates using EDM
     analyze_event_rates_with_edm(rates, num_rates);
     
-    printf("\n=== 分析完成 ===\n");
+    printf("\n=== Analysis completed ===\n");
     
     return 0;
 } 
