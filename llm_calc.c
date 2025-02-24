@@ -8,6 +8,7 @@
  * 4. 使用FFT进行高级序列处理（频域卷积和特征提取）
  * 5. 层归一化（Layer Normalization）
  * 6. 位置编码（Positional Encoding）
+ * 7. 经验动态建模（Empirical Dynamic Modeling）
  */
 
 #include "include/kisa.h"
@@ -25,6 +26,12 @@
 #define NUM_HEADS 2      // 注意力头数量
 #define HEAD_DIM 4       // 每个头的维度 (EMBEDDING_DIM / NUM_HEADS)
 #define POS_ENCODING_SCALE 100  // 位置编码缩放因子
+
+// EDM参数
+#define EDM_EMBEDDING_DIM 3     // EDM嵌入维度
+#define EDM_TIME_DELAY 1        // 时间延迟
+#define EDM_NUM_NEIGHBORS 3     // 近邻数量
+#define EDM_PREDICTION_STEPS 1  // 预测步数
 
 // 辅助函数：获取向量元素
 static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
@@ -436,6 +443,192 @@ void add_positional_encoding(vector_reg_t* result, vector_reg_t* input, int posi
     print_vector("位置编码后", result);
 }
 
+// 新增：EDM时间延迟嵌入
+void time_delay_embedding(vector_reg_t* result, vector_reg_t* input, int delay, int embedding_dim) {
+    printf("执行时间延迟嵌入 (延迟=%d, 嵌入维度=%d)\n", delay, embedding_dim);
+    
+    // 初始化结果向量为零
+#ifdef __aarch64__
+    result->low = vdupq_n_s32(0);
+    result->high = vdupq_n_s32(0);
+#else
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        (*result)[i] = 0;
+    }
+#endif
+    
+    // 对于向量的每个元素，创建延迟嵌入
+    // 注意：这里我们只使用向量的前embedding_dim个元素
+    for(int i = 0; i < embedding_dim; i++) {
+        // 计算当前时间点
+        int time_point = i * delay;
+        
+        // 如果时间点在向量范围内
+        if(time_point < VECTOR_LENGTH) {
+            int32_t value = get_vector_element(input, time_point);
+            set_vector_element(result, i, value);
+        }
+    }
+    
+    print_vector("时间延迟嵌入结果", result);
+}
+
+// 新增：计算欧几里得距离
+int32_t euclidean_distance(vector_reg_t* v1, vector_reg_t* v2, int dim) {
+    int64_t sum_sq = 0;
+    
+    for(int i = 0; i < dim; i++) {
+        int32_t diff = get_vector_element(v1, i) - get_vector_element(v2, i);
+        sum_sq += (int64_t)diff * diff;
+    }
+    
+    return (int32_t)sqrt((double)sum_sq);
+}
+
+// 新增：EDM近邻搜索
+void find_nearest_neighbors(int* neighbor_indices, vector_reg_t* target, 
+                           vector_reg_t library[], int library_size, 
+                           int num_neighbors, int embedding_dim) {
+    printf("执行近邻搜索 (库大小=%d, 近邻数=%d)\n", library_size, num_neighbors);
+    
+    // 距离数组
+    typedef struct {
+        int index;
+        int32_t distance;
+    } DistanceItem;
+    
+    DistanceItem* distances = (DistanceItem*)malloc(library_size * sizeof(DistanceItem));
+    
+    // 计算目标向量与库中每个向量的距离
+    for(int i = 0; i < library_size; i++) {
+        distances[i].index = i;
+        distances[i].distance = euclidean_distance(target, &library[i], embedding_dim);
+    }
+    
+    // 简单的冒泡排序找出最近的邻居
+    for(int i = 0; i < library_size - 1; i++) {
+        for(int j = 0; j < library_size - i - 1; j++) {
+            if(distances[j].distance > distances[j + 1].distance) {
+                DistanceItem temp = distances[j];
+                distances[j] = distances[j + 1];
+                distances[j + 1] = temp;
+            }
+        }
+    }
+    
+    // 获取最近的邻居索引
+    for(int i = 0; i < num_neighbors && i < library_size; i++) {
+        neighbor_indices[i] = distances[i].index;
+        printf("近邻 %d: 索引 %d, 距离 %d\n", i+1, neighbor_indices[i], distances[i].distance);
+    }
+    
+    free(distances);
+}
+
+// 新增：EDM预测
+void edm_predict(vector_reg_t* result, vector_reg_t* current_state, 
+                vector_reg_t library[], int library_size, 
+                int num_neighbors, int embedding_dim, int prediction_steps) {
+    printf("执行EDM预测 (预测步数=%d)\n", prediction_steps);
+    
+    // 初始化结果向量为零
+#ifdef __aarch64__
+    result->low = vdupq_n_s32(0);
+    result->high = vdupq_n_s32(0);
+#else
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        (*result)[i] = 0;
+    }
+#endif
+    
+    // 找到最近的邻居
+    int* neighbor_indices = (int*)malloc(num_neighbors * sizeof(int));
+    find_nearest_neighbors(neighbor_indices, current_state, library, library_size, num_neighbors, embedding_dim);
+    
+    // 基于近邻的加权平均进行预测
+    int32_t total_weight = 0;
+    
+    for(int i = 0; i < num_neighbors; i++) {
+        int neighbor_idx = neighbor_indices[i];
+        
+        // 计算权重（简化为距离的倒数）
+        int32_t distance = euclidean_distance(current_state, &library[neighbor_idx], embedding_dim);
+        int32_t weight = distance == 0 ? 1000 : 1000 / distance; // 避免除以零
+        total_weight += weight;
+        
+        // 对于每个预测步骤，将未来值加入结果
+        for(int step = 1; step <= prediction_steps; step++) {
+            // 确保我们不会超出库的范围
+            if(neighbor_idx + step < library_size) {
+                for(int j = 0; j < VECTOR_LENGTH; j++) {
+                    int32_t future_val = get_vector_element(&library[neighbor_idx + step], j);
+                    int32_t current_val = get_vector_element(result, j);
+                    set_vector_element(result, j, current_val + future_val * weight);
+                }
+            }
+        }
+    }
+    
+    // 归一化结果
+    if(total_weight > 0) {
+        for(int j = 0; j < VECTOR_LENGTH; j++) {
+            int32_t val = get_vector_element(result, j);
+            set_vector_element(result, j, val / total_weight);
+        }
+    }
+    
+    free(neighbor_indices);
+    print_vector("EDM预测结果", result);
+}
+
+// 新增：完整的EDM处理流程
+void apply_empirical_dynamic_modeling(vector_reg_t* result, vector_reg_t* input) {
+    printf("\n=== 应用经验动态建模 (EDM) ===\n");
+    
+    // 1. 创建一个简单的时间序列库（在实际应用中，这将是历史数据）
+    int library_size = VECTOR_LENGTH;
+    vector_reg_t* library = (vector_reg_t*)malloc(library_size * sizeof(vector_reg_t));
+    
+    // 为简化起见，我们使用输入向量的移位版本作为库
+    for(int i = 0; i < library_size; i++) {
+        // 创建移位版本
+#ifdef __aarch64__
+        library[i].low = vdupq_n_s32(0);
+        library[i].high = vdupq_n_s32(0);
+#else
+        for(int j = 0; j < VECTOR_LENGTH; j++) {
+            library[i][j] = 0;
+        }
+#endif
+        
+        for(int j = 0; j < VECTOR_LENGTH; j++) {
+            int src_idx = (j + i) % VECTOR_LENGTH;
+            int32_t val = get_vector_element(input, src_idx);
+            set_vector_element(&library[i], j, val);
+        }
+    }
+    
+    // 2. 对当前状态进行时间延迟嵌入
+    vector_reg_t embedded_state;
+    time_delay_embedding(&embedded_state, input, EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
+    
+    // 3. 对库中的每个向量进行时间延迟嵌入
+    vector_reg_t* embedded_library = (vector_reg_t*)malloc(library_size * sizeof(vector_reg_t));
+    for(int i = 0; i < library_size; i++) {
+        time_delay_embedding(&embedded_library[i], &library[i], EDM_TIME_DELAY, EDM_EMBEDDING_DIM);
+    }
+    
+    // 4. 使用EDM进行预测
+    edm_predict(result, &embedded_state, embedded_library, library_size, 
+               EDM_NUM_NEIGHBORS, EDM_EMBEDDING_DIM, EDM_PREDICTION_STEPS);
+    
+    // 5. 清理
+    free(library);
+    free(embedded_library);
+    
+    printf("EDM处理完成\n");
+}
+
 // 主函数：实现简化的Transformer层
 void transformer_layer(vector_reg_t* output, vector_reg_t* input, 
                       vector_reg_t weights_q[EMBEDDING_DIM],
@@ -471,6 +664,13 @@ void transformer_layer(vector_reg_t* output, vector_reg_t* input,
     
     // 7. 使用高级FFT处理
     advanced_fft_processing(output, output, position);
+    
+    // 8. 应用经验动态建模（EDM）
+    vector_reg_t edm_result;
+    apply_empirical_dynamic_modeling(&edm_result, output);
+    
+    // 9. 将EDM结果与当前输出结合
+    vector_add(output, output, &edm_result);
 }
 
 // 主函数
