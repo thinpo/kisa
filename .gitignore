@@ -1,0 +1,81 @@
+# Build directories
+build/
+dist/
+*.o
+*.ko
+*.obj
+*.elf
+
+# CMake
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+install_manifest.txt
+compile_commands.json
+CTestTestfile.cmake
+_deps
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+.pytest_cache/
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Debug files
+*.dSYM/
+*.su
+*.idb
+*.pdb
+
+# Binary files
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex
+
+# Library files
+*.lib
+*.a
+*.la
+*.lo
+*.dll
+*.dylib
+*.so.*
+
+# Dependency directories
+lib/
+libs/
+.cache/
+
+# Test output
+test_results/
+perf_results/
+
+# Documentation build
+docs/_build/
+docs/api/
+
+# Project specific
+kisa_test
+test_vector_ops
+test_control_flow
+perf_test 
