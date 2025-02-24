@@ -4,7 +4,7 @@
  * 这个程序实现了一个简化的LLM前向传播计算，包括：
  * 1. 矩阵-向量乘法（模拟线性层）
  * 2. 向量激活函数（使用ReLU）
- * 3. 注意力机制的简化版本
+ * 3. 多头注意力机制
  * 4. 使用FFT进行序列处理
  * 5. 层归一化（Layer Normalization）
  */
@@ -21,6 +21,8 @@
 #define SEQ_LENGTH 4     // 序列长度
 #define NUM_LAYERS 2     // 层数
 #define EPSILON 1e-5     // 归一化中防止除零的小值
+#define NUM_HEADS 2      // 注意力头数量
+#define HEAD_DIM 4       // 每个头的维度 (EMBEDDING_DIM / NUM_HEADS)
 
 // 辅助函数：获取向量元素
 static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
@@ -163,8 +165,8 @@ void matrix_vector_mul(vector_reg_t* result, vector_reg_t matrix[EMBEDDING_DIM],
     }
 }
 
-// 辅助函数：简化的自注意力机制
-void self_attention(vector_reg_t* result, vector_reg_t* query, vector_reg_t* key, vector_reg_t* value) {
+// 辅助函数：简化的单头注意力机制
+void single_head_attention(vector_reg_t* result, vector_reg_t* query, vector_reg_t* key, vector_reg_t* value) {
     vector_reg_t attention_scores;
     
     // 计算注意力分数（简化为向量乘法）
@@ -206,6 +208,85 @@ void process_sequence_with_fft(vector_reg_t* result, vector_reg_t* input) {
     vector_ifft(result, &fft_result);
 }
 
+// 新增：多头注意力机制
+void multi_head_attention(vector_reg_t* result, 
+                         vector_reg_t* query, 
+                         vector_reg_t* key, 
+                         vector_reg_t* value,
+                         vector_reg_t weights_proj[EMBEDDING_DIM]) {
+    
+    vector_reg_t head_results[NUM_HEADS];
+    vector_reg_t q_heads[NUM_HEADS], k_heads[NUM_HEADS], v_heads[NUM_HEADS];
+    vector_reg_t concat_result;
+    
+    // 初始化结果向量
+    for(int h = 0; h < NUM_HEADS; h++) {
+#ifdef __aarch64__
+        head_results[h].low = vdupq_n_s32(0);
+        head_results[h].high = vdupq_n_s32(0);
+        q_heads[h].low = vdupq_n_s32(0);
+        q_heads[h].high = vdupq_n_s32(0);
+        k_heads[h].low = vdupq_n_s32(0);
+        k_heads[h].high = vdupq_n_s32(0);
+        v_heads[h].low = vdupq_n_s32(0);
+        v_heads[h].high = vdupq_n_s32(0);
+#else
+        for(int i = 0; i < VECTOR_LENGTH; i++) {
+            head_results[h][i] = 0;
+            q_heads[h][i] = 0;
+            k_heads[h][i] = 0;
+            v_heads[h][i] = 0;
+        }
+#endif
+    }
+    
+    // 1. 将查询、键、值分割为多个头
+    for(int h = 0; h < NUM_HEADS; h++) {
+        // 简化：我们只是将向量分成几个部分
+        for(int i = 0; i < HEAD_DIM; i++) {
+            // 查询向量分割
+            int32_t q_val = get_vector_element(query, h * HEAD_DIM + i);
+            set_vector_element(&q_heads[h], i, q_val);
+            
+            // 键向量分割
+            int32_t k_val = get_vector_element(key, h * HEAD_DIM + i);
+            set_vector_element(&k_heads[h], i, k_val);
+            
+            // 值向量分割
+            int32_t v_val = get_vector_element(value, h * HEAD_DIM + i);
+            set_vector_element(&v_heads[h], i, v_val);
+        }
+    }
+    
+    // 2. 对每个头应用注意力机制
+    for(int h = 0; h < NUM_HEADS; h++) {
+        printf("处理注意力头 %d\n", h + 1);
+        single_head_attention(&head_results[h], &q_heads[h], &k_heads[h], &v_heads[h]);
+    }
+    
+    // 3. 拼接多头结果
+#ifdef __aarch64__
+    concat_result.low = vdupq_n_s32(0);
+    concat_result.high = vdupq_n_s32(0);
+#else
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        concat_result[i] = 0;
+    }
+#endif
+    
+    for(int h = 0; h < NUM_HEADS; h++) {
+        for(int i = 0; i < HEAD_DIM; i++) {
+            int32_t val = get_vector_element(&head_results[h], i);
+            set_vector_element(&concat_result, h * HEAD_DIM + i, val);
+        }
+    }
+    
+    // 4. 应用最终的线性投影
+    matrix_vector_mul(result, weights_proj, &concat_result);
+    
+    printf("多头注意力完成\n");
+}
+
 // 主函数：实现简化的Transformer层
 void transformer_layer(vector_reg_t* output, vector_reg_t* input, 
                       vector_reg_t weights_q[EMBEDDING_DIM],
@@ -220,8 +301,8 @@ void transformer_layer(vector_reg_t* output, vector_reg_t* input,
     matrix_vector_mul(&key, weights_k, input);
     matrix_vector_mul(&value, weights_v, input);
     
-    // 2. 应用自注意力机制
-    self_attention(&attention_output, &query, &key, &value);
+    // 2. 应用多头注意力机制
+    multi_head_attention(&attention_output, &query, &key, &value, weights_out);
     
     // 3. 应用输出投影
     matrix_vector_mul(&temp, weights_out, &attention_output);
