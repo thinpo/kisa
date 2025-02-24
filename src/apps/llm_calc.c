@@ -11,7 +11,7 @@
  * 7. Empirical Dynamic Modeling (EDM)
  */
 
-#include "kisa.h"
+#include "../../include/kisa.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
@@ -710,7 +710,8 @@ int main() {
     }
     
     // Output vector
-    vector_reg_t output = input;
+    vector_reg_t output;
+    memcpy(&output, &input, sizeof(vector_reg_t));
     
     // Apply multi-layer Transformer
     printf("\nStarting LLM Calculation...\n");

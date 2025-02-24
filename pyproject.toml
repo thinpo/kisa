@@ -2,7 +2,7 @@
 name = "kisa"
 version = "0.1.0"
 description = "K-Inspired Instruction Set Architecture Implementation"
-authors = ["Your Name <your.email@example.com>"]
+authors = ["thinpo <thinpott@gmail.com>"]
 
 [tool.poetry.dependencies]
 python = "^3.8"

@@ -72,18 +72,16 @@ target_include_directories(perf_test PRIVATE
 )
 target_link_libraries(perf_test PRIVATE kisa m)
 
-# Add application executables
-add_executable(orderbook_edm_analysis src/apps/orderbook_edm_analysis.c)
-target_include_directories(orderbook_edm_analysis PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
-target_link_libraries(orderbook_edm_analysis PRIVATE kisa m)
-
+# Add application executables from src/apps directory
 add_executable(llm_calc src/apps/llm_calc.c)
-target_include_directories(llm_calc PRIVATE
-    ${CMAKE_CURRENT_SOURCE_DIR}/include
-)
+# No need to set include directories explicitly, as the file uses relative paths
 target_link_libraries(llm_calc PRIVATE kisa m)
+
+# Add enhanced application executables from examples directory
+add_executable(orderbook_edm_analysis examples/orderbook_edm_analysis.c)
+# No need to set include directories explicitly, as the file uses relative paths
+# Link with math library and pthread for multi-threading support
+target_link_libraries(orderbook_edm_analysis PRIVATE kisa m pthread)
 
 # Enable testing
 enable_testing()
