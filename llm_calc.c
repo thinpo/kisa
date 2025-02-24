@@ -5,7 +5,7 @@
  * 1. 矩阵-向量乘法（模拟线性层）
  * 2. 向量激活函数（使用ReLU）
  * 3. 多头注意力机制
- * 4. 使用FFT进行序列处理
+ * 4. 使用FFT进行高级序列处理（频域卷积和特征提取）
  * 5. 层归一化（Layer Normalization）
  * 6. 位置编码（Positional Encoding）
  */
@@ -190,8 +190,8 @@ void single_head_attention(vector_reg_t* result, vector_reg_t* query, vector_reg
     vector_mul(result, &attention_scores, value);
 }
 
-// 辅助函数：使用FFT进行序列处理
-void process_sequence_with_fft(vector_reg_t* result, vector_reg_t* input) {
+// 辅助函数：使用FFT进行序列处理（简单版本）
+void process_sequence_with_fft_simple(vector_reg_t* result, vector_reg_t* input) {
     vector_reg_t fft_result, ifft_result;
     
     // 应用FFT
@@ -208,6 +208,120 @@ void process_sequence_with_fft(vector_reg_t* result, vector_reg_t* input) {
     
     // 应用IFFT
     vector_ifft(result, &fft_result);
+}
+
+// 新增：频域卷积操作
+void frequency_domain_convolution(vector_reg_t* result, vector_reg_t* input, vector_reg_t* kernel) {
+    vector_reg_t input_fft, kernel_fft, conv_result;
+    
+    // 1. 对输入和卷积核应用FFT
+    vector_fft(&input_fft, input);
+    vector_fft(&kernel_fft, kernel);
+    
+    // 2. 在频域中进行点乘（卷积在频域中等价于点乘）
+    vector_mul(&conv_result, &input_fft, &kernel_fft);
+    
+    // 3. 应用IFFT得到时域结果
+    vector_ifft(result, &conv_result);
+    
+    printf("频域卷积完成\n");
+}
+
+// 新增：频域特征提取
+void extract_frequency_features(vector_reg_t* result, vector_reg_t* input) {
+    vector_reg_t fft_result;
+    
+    // 1. 应用FFT
+    vector_fft(&fft_result, input);
+    
+    // 2. 提取频域特征
+    // 低频特征（前半部分）
+    int32_t low_freq_energy = 0;
+    for(int i = 0; i < VECTOR_LENGTH/4; i++) {
+        int32_t val = get_vector_element(&fft_result, i);
+        low_freq_energy += abs(val);
+    }
+    
+    // 中频特征
+    int32_t mid_freq_energy = 0;
+    for(int i = VECTOR_LENGTH/4; i < 3*VECTOR_LENGTH/4; i++) {
+        int32_t val = get_vector_element(&fft_result, i);
+        mid_freq_energy += abs(val);
+    }
+    
+    // 高频特征
+    int32_t high_freq_energy = 0;
+    for(int i = 3*VECTOR_LENGTH/4; i < VECTOR_LENGTH; i++) {
+        int32_t val = get_vector_element(&fft_result, i);
+        high_freq_energy += abs(val);
+    }
+    
+    // 3. 根据频域特征调整原始信号
+    // 如果低频能量高，增强高频部分
+    if(low_freq_energy > mid_freq_energy && low_freq_energy > high_freq_energy) {
+        for(int i = 3*VECTOR_LENGTH/4; i < VECTOR_LENGTH; i++) {
+            int32_t val = get_vector_element(&fft_result, i);
+            set_vector_element(&fft_result, i, val * 3);
+        }
+    }
+    // 如果高频能量高，增强低频部分
+    else if(high_freq_energy > low_freq_energy && high_freq_energy > mid_freq_energy) {
+        for(int i = 0; i < VECTOR_LENGTH/4; i++) {
+            int32_t val = get_vector_element(&fft_result, i);
+            set_vector_element(&fft_result, i, val * 3);
+        }
+    }
+    // 如果中频能量高，均衡增强
+    else {
+        for(int i = 0; i < VECTOR_LENGTH; i++) {
+            int32_t val = get_vector_element(&fft_result, i);
+            set_vector_element(&fft_result, i, val * 2);
+        }
+    }
+    
+    // 4. 应用IFFT得到增强后的时域信号
+    vector_ifft(result, &fft_result);
+    
+    printf("频域特征提取 - 低频能量: %d, 中频能量: %d, 高频能量: %d\n", 
+           low_freq_energy, mid_freq_energy, high_freq_energy);
+}
+
+// 新增：高级FFT处理（结合卷积和特征提取）
+void advanced_fft_processing(vector_reg_t* result, vector_reg_t* input, int layer) {
+    vector_reg_t conv_kernel, conv_result, feature_result;
+    
+    // 1. 创建卷积核（简化为不同的模式）
+    int32_t kernel_values[VECTOR_LENGTH];
+    if(layer % 2 == 0) {
+        // 低通滤波器模式
+        for(int i = 0; i < VECTOR_LENGTH; i++) {
+            kernel_values[i] = (i < VECTOR_LENGTH/2) ? 100 : 10;
+        }
+    } else {
+        // 高通滤波器模式
+        for(int i = 0; i < VECTOR_LENGTH; i++) {
+            kernel_values[i] = (i >= VECTOR_LENGTH/2) ? 100 : 10;
+        }
+    }
+    init_vector(&conv_kernel, kernel_values);
+    
+    // 2. 应用频域卷积
+    frequency_domain_convolution(&conv_result, input, &conv_kernel);
+    
+    // 3. 应用频域特征提取
+    extract_frequency_features(&feature_result, &conv_result);
+    
+    // 4. 将结果复制到输出
+#ifdef __aarch64__
+    result->low = feature_result.low;
+    result->high = feature_result.high;
+#else
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        (*result)[i] = feature_result[i];
+    }
+#endif
+    
+    printf("高级FFT处理完成\n");
 }
 
 // 新增：多头注意力机制
@@ -355,8 +469,8 @@ void transformer_layer(vector_reg_t* output, vector_reg_t* input,
     // 6. 应用ReLU激活函数
     relu_activation(output, &normalized);
     
-    // 7. 使用FFT进行序列处理
-    process_sequence_with_fft(output, output);
+    // 7. 使用高级FFT处理
+    advanced_fft_processing(output, output, position);
 }
 
 // 主函数
