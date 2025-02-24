@@ -10,7 +10,7 @@
  * 程序使用EDM来预测未来事件率并分析事件之间的动态关系。
  */
 
-#include "include/kisa.h"
+#include "kisa.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>

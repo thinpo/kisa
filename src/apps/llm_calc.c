@@ -11,7 +11,7 @@
  * 7. 经验动态建模（Empirical Dynamic Modeling）
  */
 
-#include "include/kisa.h"
+#include "kisa.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>

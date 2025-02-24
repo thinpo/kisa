@@ -1,3 +1,10 @@
+/**
+ * kisa.h - K-ISA (K-Inspired Instruction Set Architecture) main header file
+ * 
+ * This header defines the basic types and structures for K-ISA,
+ * including vector registers and execution context.
+ */
+
 #ifndef KISA_H
 #define KISA_H
 
@@ -115,5 +122,7 @@ bool validate_instruction(instruction_t* inst);
 bool is_vector_operation(uint8_t opcode);
 bool execute_instruction(instruction_t inst);
 void init_execution_unit(void);
+
+void print_register(const char* name, const vector_reg_t* reg);
 
 #endif // KISA_H 

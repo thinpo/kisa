@@ -72,6 +72,19 @@ target_include_directories(perf_test PRIVATE
 )
 target_link_libraries(perf_test PRIVATE kisa m)
 
+# Add application executables
+add_executable(orderbook_edm_analysis src/apps/orderbook_edm_analysis.c)
+target_include_directories(orderbook_edm_analysis PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(orderbook_edm_analysis PRIVATE kisa m)
+
+add_executable(llm_calc src/apps/llm_calc.c)
+target_include_directories(llm_calc PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+)
+target_link_libraries(llm_calc PRIVATE kisa m)
+
 # Enable testing
 enable_testing()
 add_test(NAME vector_ops_test COMMAND test_vector_ops)
