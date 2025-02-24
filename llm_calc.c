@@ -7,6 +7,7 @@
  * 3. 多头注意力机制
  * 4. 使用FFT进行序列处理
  * 5. 层归一化（Layer Normalization）
+ * 6. 位置编码（Positional Encoding）
  */
 
 #include "include/kisa.h"
@@ -23,6 +24,7 @@
 #define EPSILON 1e-5     // 归一化中防止除零的小值
 #define NUM_HEADS 2      // 注意力头数量
 #define HEAD_DIM 4       // 每个头的维度 (EMBEDDING_DIM / NUM_HEADS)
+#define POS_ENCODING_SCALE 100  // 位置编码缩放因子
 
 // 辅助函数：获取向量元素
 static inline int32_t get_vector_element(const vector_reg_t* reg, int i) {
@@ -106,7 +108,7 @@ void relu_activation(vector_reg_t* result, vector_reg_t* input) {
     vector_select(result, &mask, input, &zero);
 }
 
-// 新增：层归一化函数
+// 层归一化函数
 void layer_normalization(vector_reg_t* result, vector_reg_t* input) {
     // 计算均值
     int64_t sum = 0;
@@ -124,7 +126,7 @@ void layer_normalization(vector_reg_t* result, vector_reg_t* input) {
     int32_t variance = variance_sum / VECTOR_LENGTH;
     
     // 防止除零
-    if (variance == 0) variance = 1;
+    if (variance < 10) variance = 10;  // 使用更大的最小值防止标准差过小
     
     // 标准差
     int32_t std_dev = (int32_t)sqrt((double)variance);
@@ -287,19 +289,56 @@ void multi_head_attention(vector_reg_t* result,
     printf("多头注意力完成\n");
 }
 
+// 新增：位置编码函数
+void add_positional_encoding(vector_reg_t* result, vector_reg_t* input, int position) {
+    // 复制输入到结果
+#ifdef __aarch64__
+    result->low = input->low;
+    result->high = input->high;
+#else
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        (*result)[i] = (*input)[i];
+    }
+#endif
+    
+    // 应用位置编码
+    for(int i = 0; i < VECTOR_LENGTH; i++) {
+        // 计算位置编码
+        int32_t pos_enc;
+        if(i % 2 == 0) {
+            // 使用正弦函数对偶数位置
+            pos_enc = (int32_t)(sin(position / pow(10000, i / (double)EMBEDDING_DIM)) * POS_ENCODING_SCALE);
+        } else {
+            // 使用余弦函数对奇数位置
+            pos_enc = (int32_t)(cos(position / pow(10000, (i - 1) / (double)EMBEDDING_DIM)) * POS_ENCODING_SCALE);
+        }
+        
+        // 将位置编码添加到输入
+        int32_t val = get_vector_element(result, i) + pos_enc;
+        set_vector_element(result, i, val);
+    }
+    
+    printf("添加位置编码 %d: ", position);
+    print_vector("位置编码后", result);
+}
+
 // 主函数：实现简化的Transformer层
 void transformer_layer(vector_reg_t* output, vector_reg_t* input, 
                       vector_reg_t weights_q[EMBEDDING_DIM],
                       vector_reg_t weights_k[EMBEDDING_DIM],
                       vector_reg_t weights_v[EMBEDDING_DIM],
-                      vector_reg_t weights_out[EMBEDDING_DIM]) {
+                      vector_reg_t weights_out[EMBEDDING_DIM],
+                      int position) {
     
-    vector_reg_t query, key, value, attention_output, temp, normalized;
+    vector_reg_t query, key, value, attention_output, temp, normalized, pos_encoded;
+    
+    // 0. 添加位置编码
+    add_positional_encoding(&pos_encoded, input, position);
     
     // 1. 计算查询、键、值向量
-    matrix_vector_mul(&query, weights_q, input);
-    matrix_vector_mul(&key, weights_k, input);
-    matrix_vector_mul(&value, weights_v, input);
+    matrix_vector_mul(&query, weights_q, &pos_encoded);
+    matrix_vector_mul(&key, weights_k, &pos_encoded);
+    matrix_vector_mul(&value, weights_v, &pos_encoded);
     
     // 2. 应用多头注意力机制
     multi_head_attention(&attention_output, &query, &key, &value, weights_out);
@@ -308,7 +347,7 @@ void transformer_layer(vector_reg_t* output, vector_reg_t* input,
     matrix_vector_mul(&temp, weights_out, &attention_output);
     
     // 4. 残差连接
-    vector_add(output, &temp, input);
+    vector_add(output, &temp, &pos_encoded);
     
     // 5. 应用层归一化
     layer_normalization(&normalized, output);
@@ -364,7 +403,8 @@ int main() {
     for(int layer = 0; layer < NUM_LAYERS; layer++) {
         printf("\n=== 第 %d 层 ===\n", layer + 1);
         
-        transformer_layer(&output, &output, weights_q, weights_k, weights_v, weights_out);
+        // 为每一层使用不同的位置编码
+        transformer_layer(&output, &output, weights_q, weights_k, weights_v, weights_out, layer);
         
         print_vector("层输出", &output);
     }
